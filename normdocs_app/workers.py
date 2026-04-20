@@ -8,7 +8,7 @@ from typing import Literal
 from normdocs_app.config import AppConfig
 from normdocs_app.services.document_text import collect_corpus
 from normdocs_app.services.flow_resolve import resolve_normdocs_flow_ids
-from normdocs_app.services.langflow_client import LangflowClient, LangflowError
+from normdocs_app.services.langflow_client import LangflowClient, LangflowError, humanize_error
 from normdocs_app.services.payloads import payload_fill_template, payload_form_from_normatives, payload_verify
 
 # Сообщения: ("log", str) | ("step", title, text) | ("state", key, str) | ("ok",) | ("err", str)
@@ -35,7 +35,7 @@ def _resolve_and_client(cfg: AppConfig, ui_queue: queue.Queue) -> tuple[AppConfi
     try:
         cfg = resolve_normdocs_flow_ids(cfg)
     except LangflowError as e:
-        ui_queue.put(("err", str(e)))
+        ui_queue.put(("err", humanize_error(e)))
         return None
     ui_queue.put(
         (
@@ -179,7 +179,7 @@ def run_pipeline_in_thread(
 
             ui_queue.put(("ok",))
         except (LangflowError, OSError, RuntimeError) as e:
-            ui_queue.put(("err", str(e)))
+            ui_queue.put(("err", humanize_error(e)))
 
     t = threading.Thread(target=task, daemon=True)
     t.start()

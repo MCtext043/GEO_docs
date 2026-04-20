@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 from urllib.parse import urljoin
 
@@ -11,6 +12,67 @@ from normdocs_app.config import AppConfig
 
 class LangflowError(RuntimeError):
     pass
+
+
+def _translate_http_status(status_code: int) -> str:
+    if status_code == 400:
+        return "Некорректный запрос к Langflow (HTTP 400). Проверьте входные данные и настройки потока."
+    if status_code == 401:
+        return "Ошибка авторизации в Langflow (HTTP 401). Проверьте API-ключ."
+    if status_code == 403:
+        return "Доступ запрещен в Langflow (HTTP 403). Ключ не имеет нужных прав или поток недоступен."
+    if status_code == 404:
+        return "Ресурс Langflow не найден (HTTP 404). Проверьте URL сервера и UUID потока."
+    if status_code == 422:
+        return "Langflow не смог обработать запрос (HTTP 422). Проверьте структуру данных и схему потока."
+    if status_code == 500:
+        return "Внутренняя ошибка сервера Langflow (HTTP 500). Проверьте логи Langflow."
+    if status_code == 502:
+        return "Шлюз Langflow недоступен (HTTP 502). Проверьте состояние сервера."
+    if status_code == 503:
+        return "Сервис Langflow временно недоступен (HTTP 503). Повторите попытку позже."
+    if status_code == 504:
+        return "Langflow не ответил вовремя (HTTP 504). Проверьте нагрузку и таймауты."
+    return f"Ошибка HTTP {status_code} при обращении к Langflow."
+
+
+def _translate_text_message(message: str) -> str:
+    msg = (message or "").strip()
+    if not msg:
+        return "Произошла ошибка при работе с Langflow."
+
+    low = msg.lower()
+    if "timed out" in low or "timeout" in low:
+        return "Превышено время ожидания ответа от Langflow. Проверьте, что сервер запущен и отвечает."
+    if "failed to establish a new connection" in low or "connection refused" in low:
+        return "Не удалось подключиться к Langflow. Проверьте URL и что сервер действительно запущен."
+    if "name or service not known" in low or "nodename nor servname provided" in low:
+        return "Не удалось определить адрес сервера Langflow. Проверьте правильность URL."
+    if "ssl" in low and "error" in low:
+        return "Ошибка SSL при подключении к Langflow. Проверьте сертификаты или используйте корректный URL."
+    if "401 unauthorized" in low:
+        return "Ошибка авторизации (401). Проверьте API-ключ Langflow."
+    if "404" in low and "not found" in low:
+        return "Ресурс не найден в Langflow. Проверьте UUID потока и endpoint."
+
+    m = re.search(r"\bHTTP\s+(\d{3})\b", msg, flags=re.IGNORECASE)
+    if m:
+        return _translate_http_status(int(m.group(1))) + f"\n\nТехнические детали: {msg}"
+    return msg
+
+
+def humanize_error(err: BaseException) -> str:
+    if isinstance(err, LangflowError):
+        return _translate_text_message(str(err))
+    if isinstance(err, requests.Timeout):
+        return "Превышено время ожидания ответа от Langflow. Проверьте сеть и доступность сервера."
+    if isinstance(err, requests.ConnectionError):
+        return "Не удалось подключиться к Langflow. Проверьте URL, сеть и что сервер запущен."
+    if isinstance(err, requests.RequestException):
+        return _translate_text_message(f"Ошибка сетевого запроса: {err}")
+    if isinstance(err, OSError):
+        return f"Ошибка доступа к файлам или системе: {err}"
+    return _translate_text_message(str(err))
 
 
 def _walk_text(obj: Any, out: list[str]) -> None:

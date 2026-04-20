@@ -12,7 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 from normdocs_app.config import AppConfig
 from normdocs_app.services.flow_provision import provision_normdocs_flows
 from normdocs_app.services.flow_resolve import discover_normdocs_flow_ids
-from normdocs_app.services.langflow_client import LangflowClient, LangflowError
+from normdocs_app.services.langflow_client import LangflowClient, LangflowError, humanize_error
 from normdocs_app.workers import PipelineMode, run_pipeline_in_thread
 
 SETTINGS_FILE = Path.home() / ".normdocs_langflow_settings.json"
@@ -476,9 +476,9 @@ class MainWindow:
             try:
                 ids = provision_normdocs_flows(cfg)
             except LangflowError as e:
-                err = str(e)
+                err = humanize_error(e)
             except OSError as e:
-                err = str(e)
+                err = humanize_error(e)
 
             def finish() -> None:
                 self._provision_busy = False
@@ -522,7 +522,7 @@ class MainWindow:
             try:
                 triple = discover_normdocs_flow_ids(LangflowClient(cfg))
             except LangflowError as e:
-                err = str(e)
+                err = humanize_error(e)
 
             def finish() -> None:
                 self._check_flows_busy = False
