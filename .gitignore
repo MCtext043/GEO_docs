@@ -15,8 +15,7 @@ venv/
 
 # Build artifacts
 build/
-dist/
-*.spec
+# dist/ intentionally tracked for sharing working builds
 
 # Local secrets
 .env

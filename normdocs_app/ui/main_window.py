@@ -17,14 +17,21 @@ from normdocs_app.workers import PipelineMode, run_pipeline_in_thread
 
 SETTINGS_FILE = Path.home() / ".normdocs_langflow_settings.json"
 
-# Палитра (светлая, спокойная)
-BG = "#eef1f6"
+# Палитра: сдержанная «офисная», без ярких акцентов
+HEADER_BG = "#1e293b"
+HEADER_FG = "#f8fafc"
+HEADER_MUTED = "#94a3b8"
+BG = "#f1f5f9"
 CARD = "#ffffff"
+SURFACE = "#f8fafc"
 TEXT_MUTED = "#64748b"
 TEXT_MAIN = "#0f172a"
-ACCENT = "#1d4ed8"
-ACCENT_HOVER = "#2563eb"
-BORDER = "#cbd5e1"
+ACCENT = "#1e40af"
+ACCENT_HOVER = "#1d4ed8"
+ACCENT_DIM = "#eff6ff"
+BORDER = "#e2e8f0"
+BORDER_STRONG = "#cbd5e1"
+LOG_BG = "#fafbfc"
 
 
 def _load_json() -> dict:
@@ -57,35 +64,83 @@ def _setup_styles(root: tk.Tk) -> ttk.Style:
     style.configure(".", background=BG, foreground=TEXT_MAIN)
     style.configure("TFrame", background=BG)
     style.configure("Card.TFrame", background=CARD, relief="flat")
+    style.configure("Surface.TFrame", background=SURFACE, relief="flat")
+    style.configure("Surface.TLabel", background=SURFACE, foreground=TEXT_MAIN)
     style.configure("TLabel", background=BG, foreground=TEXT_MAIN)
     style.configure("Card.TLabel", background=CARD, foreground=TEXT_MAIN)
     style.configure("Muted.TLabel", background=BG, foreground=TEXT_MUTED, font=("Segoe UI", 9))
-    style.configure("Title.TLabel", background=BG, foreground=TEXT_MAIN, font=("Segoe UI", 14, "bold"))
-    style.configure("TLabelframe", background=CARD, relief="solid", borderwidth=1)
-    style.configure("TLabelframe.Label", background=CARD, foreground=ACCENT, font=("Segoe UI", 10, "bold"))
+    style.configure("Section.TLabel", background=CARD, foreground=TEXT_MAIN, font=("Segoe UI", 10))
+    style.configure(
+        "TLabelframe",
+        background=CARD,
+        relief="solid",
+        borderwidth=1,
+        bordercolor=BORDER,
+    )
+    style.configure(
+        "TLabelframe.Label",
+        background=CARD,
+        foreground=TEXT_MAIN,
+        font=("Segoe UI", 10),
+    )
     style.configure("TNotebook", background=BG, borderwidth=0)
-    style.configure("TNotebook.Tab", padding=(14, 8), font=("Segoe UI", 10))
-    style.map("TNotebook.Tab", background=[("selected", CARD), ("!selected", "#e2e8f0")])
-    style.configure("TButton", padding=(10, 6))
-    style.configure("Accent.TButton", padding=(12, 8))
+    style.configure(
+        "TNotebook.Tab",
+        padding=(18, 10),
+        font=("Segoe UI", 10),
+        background=SURFACE,
+    )
+    style.map(
+        "TNotebook.Tab",
+        background=[("selected", CARD), ("!selected", SURFACE)],
+        foreground=[("selected", TEXT_MAIN), ("!selected", TEXT_MUTED)],
+        expand=[("selected", [1, 1, 1, 0])],
+    )
+    style.configure("TButton", padding=(12, 7))
+    style.map(
+        "TButton",
+        background=[("active", SURFACE), ("!disabled", CARD)],
+        foreground=[("!disabled", TEXT_MAIN)],
+    )
+    style.configure("Secondary.TButton", padding=(10, 7))
+    style.map(
+        "Secondary.TButton",
+        background=[("active", ACCENT_DIM), ("!disabled", CARD)],
+        foreground=[("!disabled", TEXT_MAIN)],
+        relief=[("pressed", "sunken"), ("!pressed", "raised")],
+    )
+    style.configure("Accent.TButton", padding=(14, 9))
     style.map(
         "Accent.TButton",
         background=[("active", ACCENT_HOVER), ("!disabled", ACCENT)],
         foreground=[("!disabled", "#ffffff")],
     )
-    style.configure("TSpinbox", fieldbackground=CARD, padding=(4, 2))
-    style.configure("TEntry", fieldbackground=CARD, padding=4)
-    style.configure("Horizontal.TProgressbar", troughcolor="#e2e8f0", background=ACCENT, thickness=8)
+    style.configure("TSpinbox", fieldbackground=CARD, padding=(6, 4), bordercolor=BORDER)
+    style.configure("TEntry", fieldbackground=CARD, padding=6, bordercolor=BORDER)
+    style.configure("Horizontal.TProgressbar", troughcolor=BORDER, background=ACCENT, thickness=6)
     style.configure("MutedOnCard.TLabel", background=CARD, foreground=TEXT_MUTED, font=("Segoe UI", 9))
+    style.configure("TSeparator", background=BORDER)
     return style
+
+
+def _style_text_widget(w: tk.Text) -> None:
+    w.configure(
+        selectbackground="#dbeafe",
+        selectforeground=TEXT_MAIN,
+        insertbackground=ACCENT,
+        highlightthickness=1,
+        highlightbackground=BORDER,
+        highlightcolor=ACCENT,
+        bd=0,
+    )
 
 
 class MainWindow:
     def __init__(self) -> None:
         self.root = tk.Tk()
         self.root.title("NormDocs — нормативка → отчёт")
-        self.root.geometry("1020x820")
-        self.root.minsize(880, 640)
+        self.root.geometry("1040x840")
+        self.root.minsize(900, 660)
         _setup_styles(self.root)
 
         self._queue: queue.Queue = queue.Queue()
@@ -98,27 +153,42 @@ class MainWindow:
         self._cache_form = ""
         self._cache_filled = ""
 
-        outer = ttk.Frame(self.root, padding=(16, 14))
+        outer = ttk.Frame(self.root)
         outer.pack(fill=tk.BOTH, expand=True)
 
-        header = ttk.Frame(outer)
-        header.pack(fill=tk.X, pady=(0, 10))
-        ttk.Label(header, text="NormDocs", style="Title.TLabel").pack(anchor=tk.W)
-        ttk.Label(
-            header,
-            text="Папки с документами → три шага Langflow (можно по одному или сразу все).",
-            style="Muted.TLabel",
-        ).pack(anchor=tk.W, pady=(2, 0))
+        header_bar = tk.Frame(outer, bg=HEADER_BG)
+        header_bar.pack(fill=tk.X)
+        header_inner = tk.Frame(header_bar, bg=HEADER_BG)
+        header_inner.pack(fill=tk.X, padx=22, pady=(16, 14))
+        tk.Label(
+            header_inner,
+            text="NormDocs",
+            bg=HEADER_BG,
+            fg=HEADER_FG,
+            font=("Segoe UI", 16),
+            anchor=tk.W,
+        ).pack(anchor=tk.W)
+        tk.Label(
+            header_inner,
+            text="Нормативные документы и вводные данные → три шага Langflow (по одному или все сразу).",
+            bg=HEADER_BG,
+            fg=HEADER_MUTED,
+            font=("Segoe UI", 9),
+            anchor=tk.W,
+        ).pack(anchor=tk.W, pady=(6, 0))
 
-        nb = ttk.Notebook(outer)
+        body = ttk.Frame(outer, padding=(18, 14))
+        body.pack(fill=tk.BOTH, expand=True)
+
+        nb = ttk.Notebook(body)
         nb.pack(fill=tk.BOTH, expand=True)
 
         # --- Настройки ---
-        tab_set = ttk.Frame(nb, padding=8)
-        nb.add(tab_set, text="Настройки")
-        card_set = ttk.Frame(tab_set, style="Card.TFrame", padding=14)
+        tab_set = ttk.Frame(nb, padding=(4, 10, 4, 8))
+        nb.add(tab_set, text="  Настройки  ")
+        card_set = ttk.Frame(tab_set, style="Card.TFrame", padding=(18, 16))
         card_set.pack(fill=tk.BOTH, expand=True)
-        f_set = ttk.LabelFrame(card_set, text="Подключение к Langflow", padding=12)
+        f_set = ttk.LabelFrame(card_set, text=" Подключение к Langflow ", padding=(14, 12))
         f_set.pack(fill=tk.X)
 
         self.var_base = tk.StringVar()
@@ -152,7 +222,7 @@ class MainWindow:
             row=r, column=1, sticky=tk.W, pady=4, padx=(8, 0)
         )
         r += 1
-        ttk.Button(f_set, text="Сохранить настройки", command=self._save_settings).grid(
+        ttk.Button(f_set, text="Сохранить настройки", style="Secondary.TButton", command=self._save_settings).grid(
             row=r, column=1, sticky=tk.W, pady=(12, 4), padx=(8, 0)
         )
         r += 1
@@ -161,10 +231,16 @@ class MainWindow:
         self.btn_provision = ttk.Button(
             row_btns,
             text="Создать три потока в Langflow",
+            style="Secondary.TButton",
             command=self._provision_flows,
         )
         self.btn_provision.pack(side=tk.LEFT, padx=(0, 8))
-        self.btn_check_flows = ttk.Button(row_btns, text="Проверить потоки на сервере", command=self._check_flows_on_server)
+        self.btn_check_flows = ttk.Button(
+            row_btns,
+            text="Проверить потоки на сервере",
+            style="Secondary.TButton",
+            command=self._check_flows_on_server,
+        )
         self.btn_check_flows.pack(side=tk.LEFT)
         f_set.columnconfigure(1, weight=1)
 
@@ -181,36 +257,58 @@ class MainWindow:
         hint.pack(fill=tk.X, pady=(16, 0))
 
         # --- Отчёт ---
-        tab_run = ttk.Frame(nb, padding=8)
-        nb.add(tab_run, text="Отчёт")
-        card_run = ttk.Frame(tab_run, style="Card.TFrame", padding=14)
+        tab_run = ttk.Frame(nb, padding=(4, 10, 4, 8))
+        nb.add(tab_run, text="  Отчёт  ")
+        card_run = ttk.Frame(tab_run, style="Card.TFrame", padding=(18, 16))
         card_run.pack(fill=tk.BOTH, expand=True)
 
         self.var_norm = tk.StringVar()
         self.var_data = tk.StringVar()
 
+        paths_header = ttk.Label(card_run, text="Источники данных", style="Section.TLabel")
+        paths_header.pack(anchor=tk.W, pady=(0, 4))
+
         def folder_row(parent, label: str, var: tk.StringVar) -> None:
-            fr = ttk.Frame(parent, style="Card.TFrame")
-            fr.pack(fill=tk.X, pady=6)
-            ttk.Label(fr, text=label, width=22, style="Card.TLabel").pack(side=tk.LEFT, anchor=tk.NW)
-            ttk.Entry(fr, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 8))
-            ttk.Button(fr, text="Папка…", width=12, command=lambda: self._pick_folder(var)).pack(side=tk.LEFT)
+            fr = ttk.Frame(parent, style="Surface.TFrame", padding=(12, 10))
+            fr.pack(fill=tk.X, pady=(0, 8))
+            ttk.Label(fr, text=label, width=22, style="Surface.TLabel").pack(side=tk.LEFT, anchor=tk.NW)
+            ttk.Entry(fr, textvariable=var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+            ttk.Button(fr, text="Обзор…", width=11, style="Secondary.TButton", command=lambda: self._pick_folder(var)).pack(
+                side=tk.LEFT
+            )
 
         folder_row(card_run, "Папка с нормативкой", self.var_norm)
         folder_row(card_run, "Папка с вводными", self.var_data)
 
-        steps_fr = ttk.LabelFrame(card_run, text="Шаги Langflow (по порядку или все сразу)", padding=10)
-        steps_fr.pack(fill=tk.X, pady=(14, 8))
+        ttk.Separator(card_run, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(6, 14))
+
+        steps_fr = ttk.LabelFrame(card_run, text=" Конвейер Langflow ", padding=(14, 12))
+        steps_fr.pack(fill=tk.X, pady=(0, 8))
 
         btn_row = ttk.Frame(steps_fr)
         btn_row.pack(fill=tk.X)
-        self.btn_s1 = ttk.Button(btn_row, text="1 — Форма отчёта", command=lambda: self._start_pipeline("1"))
-        self.btn_s1.pack(side=tk.LEFT, padx=(0, 6))
-        self.btn_s2 = ttk.Button(btn_row, text="2 — Заполнение", command=lambda: self._start_pipeline("2"))
-        self.btn_s2.pack(side=tk.LEFT, padx=(0, 6))
-        self.btn_s3 = ttk.Button(btn_row, text="3 — Проверка", command=lambda: self._start_pipeline("3"))
-        self.btn_s3.pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Label(btn_row, text="│", style="MutedOnCard.TLabel").pack(side=tk.LEFT, padx=8)
+        self.btn_s1 = ttk.Button(
+            btn_row,
+            text="1 · Форма отчёта",
+            style="Secondary.TButton",
+            command=lambda: self._start_pipeline("1"),
+        )
+        self.btn_s1.pack(side=tk.LEFT, padx=(0, 8))
+        self.btn_s2 = ttk.Button(
+            btn_row,
+            text="2 · Заполнение",
+            style="Secondary.TButton",
+            command=lambda: self._start_pipeline("2"),
+        )
+        self.btn_s2.pack(side=tk.LEFT, padx=(0, 8))
+        self.btn_s3 = ttk.Button(
+            btn_row,
+            text="3 · Проверка",
+            style="Secondary.TButton",
+            command=lambda: self._start_pipeline("3"),
+        )
+        self.btn_s3.pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Separator(btn_row, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=6, pady=2)
         self.btn_run = ttk.Button(
             btn_row,
             text="Выполнить все три",
@@ -220,29 +318,28 @@ class MainWindow:
         self.btn_run.pack(side=tk.LEFT)
 
         self.var_status = tk.StringVar(value="Готово к работе.")
-        ttk.Label(steps_fr, textvariable=self.var_status, style="MutedOnCard.TLabel").pack(anchor=tk.W, pady=(8, 4))
+        ttk.Label(steps_fr, textvariable=self.var_status, style="MutedOnCard.TLabel").pack(anchor=tk.W, pady=(10, 6))
 
         self.prog = ttk.Progressbar(steps_fr, mode="indeterminate", style="Horizontal.TProgressbar")
-        self.prog.pack(fill=tk.X, pady=(0, 4))
+        self.prog.pack(fill=tk.X, pady=(0, 2))
 
         paned = ttk.PanedWindow(card_run, orient=tk.VERTICAL)
-        paned.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
+        paned.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
 
-        log_frame = ttk.LabelFrame(paned, text="Журнал", padding=6)
+        log_frame = ttk.LabelFrame(paned, text=" Журнал ", padding=(8, 6))
         paned.add(log_frame, weight=1)
         self.txt_log = tk.Text(
             log_frame,
             height=9,
             wrap=tk.WORD,
             font=("Consolas", 9),
-            bg=CARD,
+            bg=LOG_BG,
             fg=TEXT_MAIN,
             relief="flat",
-            highlightthickness=1,
-            highlightbackground=BORDER,
-            padx=8,
-            pady=8,
+            padx=10,
+            pady=10,
         )
+        _style_text_widget(self.txt_log)
         self.txt_log.pack(fill=tk.BOTH, expand=True)
 
         out_nb = ttk.Notebook(paned)
@@ -256,19 +353,18 @@ class MainWindow:
                 bg=CARD,
                 fg=TEXT_MAIN,
                 relief="flat",
-                highlightthickness=1,
-                highlightbackground=BORDER,
-                padx=10,
-                pady=10,
+                padx=12,
+                pady=12,
             )
+            _style_text_widget(t)
             return t
 
         self.txt_form = make_out_text(out_nb)
         self.txt_filled = make_out_text(out_nb)
         self.txt_verify = make_out_text(out_nb)
-        out_nb.add(self.txt_form, text="1. Форма")
-        out_nb.add(self.txt_filled, text="2. Заполненный отчёт")
-        out_nb.add(self.txt_verify, text="3. Проверка")
+        out_nb.add(self.txt_form, text="  Шаг 1 · Форма  ")
+        out_nb.add(self.txt_filled, text="  Шаг 2 · Заполнение  ")
+        out_nb.add(self.txt_verify, text="  Шаг 3 · Проверка  ")
 
         self._load_settings()
         self._defaults_downloads()
