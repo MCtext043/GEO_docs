@@ -19,3 +19,7 @@ build/
 
 # Local secrets
 .env
+docker/langflow/langflow.env
+
+# Container runtime data
+langflow_data/

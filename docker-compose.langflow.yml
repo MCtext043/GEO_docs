@@ -1,0 +1,29 @@
+services:
+  langflow:
+    image: langflowai/langflow:latest
+    container_name: normdocs-langflow
+    restart: unless-stopped
+    command: langflow run --host 0.0.0.0 --port 7860
+    ports:
+      - "7860:7860"
+    env_file:
+      - path: ./docker/langflow/langflow.env
+        required: false
+    environment:
+      LANGFLOW_CONFIG_DIR: /app/langflow
+      LANGFLOW_DATABASE_URL: sqlite:////app/langflow/langflow.db
+      LANGFLOW_AUTO_LOGIN: "false"
+      DO_NOT_TRACK: "true"
+    volumes:
+      - ./langflow_data:/app/langflow
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:7860/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 7s
+      retries: 10

@@ -63,10 +63,45 @@ flowchart LR
 ## Требования
 
 - **Python 3** и отдельное venv для NormDocs (`requirements-normdocs.txt`).
-- Отдельно запущенный **Langflow** (см. [официальный Quickstart](https://github.com/langflow-ai/langflow)): например `uv pip install langflow -U` и `uv run langflow run`, UI на `http://127.0.0.1:7860`.
+- Отдельно запущенный **Langflow** (локально или в Docker), UI на `http://127.0.0.1:7860`.
 - В Langflow нужен **API-ключ** для вызовов из приложения.
 - Документы можно задавать как **папки**, **отдельные файлы** или **RAR-архивы**.
 - Поддержан OCR для изображений (`.jpg/.png/.tif/...`) в обычных файлах и внутри `.rar` (через Tesseract).
+
+---
+
+## Контейнеризация Langflow (Docker)
+
+В репозитории есть готовый compose-файл для сервера Langflow: `docker-compose.langflow.yml`.
+
+1. Подготовьте env-файл:
+
+```bash
+copy docker\langflow\langflow.env.example docker\langflow\langflow.env
+```
+
+2. При необходимости заполните `docker\langflow\langflow.env` (например, `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `MISTRAL_API_KEY`).
+
+3. Запустите Langflow:
+
+```bash
+docker compose -f docker-compose.langflow.yml up -d
+```
+
+4. Проверьте, что контейнер и health в порядке:
+
+```bash
+docker compose -f docker-compose.langflow.yml ps
+curl http://127.0.0.1:7860/health
+```
+
+5. Остановить сервер:
+
+```bash
+docker compose -f docker-compose.langflow.yml down
+```
+
+Данные Langflow (flows, настройки, БД) сохраняются в `langflow_data/` на хосте.
 
 ---
 
@@ -138,6 +173,7 @@ python run_desktop.py
 ## Langflow на Windows (важно)
 
 - Установка пакета `langflow` через `pip` в **глубоком пути** (`...\PycharmProjects\...`) может падать с ошибкой длинного пути; рекомендуется [включить Long Paths в Windows](https://pip.pypa.io/warnings/enable-long-paths) **или** ставить/запускать из короткого пути, **или** использовать `uv` по [инструкции Langflow](https://github.com/langflow-ai/langflow): `uv pip install langflow -U`, `uv run langflow run`.
+- Для изолированного и воспроизводимого запуска предпочтителен Docker (`docker-compose.langflow.yml`).
 - Примерные и «starter» потоки на сервере могут возвращать **403** при `run`; для работы нужны **свои** потоки (в т.ч. созданные кнопкой «Создать три потока в Langflow»).
 
 ---
