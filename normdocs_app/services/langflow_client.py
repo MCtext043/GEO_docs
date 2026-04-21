@@ -54,6 +54,23 @@ def _translate_text_message(message: str) -> str:
         return "Ошибка авторизации (401). Проверьте API-ключ Langflow."
     if "404" in low and "not found" in low:
         return "Ресурс не найден в Langflow. Проверьте UUID потока и endpoint."
+    if "mistral api http 503" in low or "unreachable_backend" in low:
+        return (
+            "Сервис модели Mistral временно недоступен (HTTP 503). "
+            "Это внешний сбой провайдера, попробуйте повторить запуск через 1-2 минуты."
+        )
+    if "mistral api http 429" in low or "rate limit" in low:
+        return "Превышен лимит запросов к Mistral (429). Подождите немного и повторите запуск."
+    if "invalid argument" in low and "errno 22" in low:
+        return (
+            "Система получила недопустимый путь к файлу. "
+            "Проверьте, что выбранные файлы существуют и доступны для чтения."
+        )
+    if "outdated components" in low and "flow contains" in low:
+        return (
+            "В Langflow используется устаревший flow-компонент. "
+            "Откройте flow и обновите предложенные компоненты, затем запустите снова."
+        )
 
     m = re.search(r"\bHTTP\s+(\d{3})\b", msg, flags=re.IGNORECASE)
     if m:

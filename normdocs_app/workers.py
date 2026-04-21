@@ -185,60 +185,59 @@ def run_pipeline_in_thread(
                 rag_ingest = (flow_cfg.flow_rag_ingest_id or "").strip()
                 rag_summary = (flow_cfg.flow_rag_summary_id or "").strip()
                 if rag_ingest and rag_summary:
-                    ui_queue.put(("log", f"RAG: загрузка документов в коллекцию «{collection}»…"))
-                    _run_generation_with_fallback(
-                        client,
-                        flow_cfg,
-                        rag_ingest,
-                        payload_rag_ingest(collection, documents_corpus),
-                        ui_queue,
-                        stage_label="RAG ingest",
-                    )
-                    ui_queue.put(("log", "RAG: индексация завершена, запускаю retrieval + summary…"))
-                    summary = _run_generation_with_fallback(
-                        client,
-                        flow_cfg,
-                        rag_summary,
-                        payload_rag_summary(collection),
-                        ui_queue,
-                        stage_label="RAG summary",
-                    )
-                else:
-                    fallback = (flow_cfg.legacy_flow_id or "").strip()
-                    if not fallback:
+                    try:
+                        ui_queue.put(("log", f"RAG: загрузка документов в коллекцию «{collection}»…"))
+                        client.run_flow(rag_ingest, payload_rag_ingest(collection, documents_corpus))
+                        ui_queue.put(("log", "RAG: индексация завершена, запускаю retrieval + summary…"))
+                        summary = client.run_flow(rag_summary, payload_rag_summary(collection))
+                    except LangflowError:
+                        if not (flow_cfg.mistral_api_key or "").strip():
+                            raise
                         ui_queue.put(
                             (
-                                "err",
-                                "Не указан flow для суммаризации. Задайте LANGFLOW_FLOW_RAG_* "
-                                "или LANGFLOW_FLOW_ID в настройках/.env.",
+                                "log",
+                                "RAG-потоки временно недоступны на сервере. "
+                                "Переключаюсь на прямую суммаризацию через Mistral.",
                             )
                         )
-                        return
-                    ui_queue.put(
-                        (
-                            "log",
-                            "RAG flow не задан. Использую fallback LANGFLOW_FLOW_ID для прямой суммаризации.",
+                        summary = summarize_documents(
+                            documents_corpus,
+                            flow_cfg.mistral_api_key,
+                            timeout_sec=flow_cfg.request_timeout_sec,
                         )
-                    )
-                    try:
-                        summary = client.run_flow(fallback, payload_direct_summary(documents_corpus))
-                    except LangflowError:
-                        # Pragmatic fallback for local setup: if flow has no model configured,
-                        # use direct Mistral call so user still gets summary immediately.
-                        if (flow_cfg.mistral_api_key or "").strip():
+                else:
+                    # Если RAG-потоки не настроены, сразу используем прямую суммаризацию.
+                    # Это убирает лишний шаг с заведомо проблемным legacy-flow и ускоряет ответ.
+                    if (flow_cfg.mistral_api_key or "").strip():
+                        ui_queue.put(
+                            (
+                                "log",
+                                "RAG-потоки не настроены. Выполняю прямую суммаризацию через Mistral (рабочий режим).",
+                            )
+                        )
+                        summary = summarize_documents(
+                            documents_corpus,
+                            flow_cfg.mistral_api_key,
+                            timeout_sec=flow_cfg.request_timeout_sec,
+                        )
+                    else:
+                        fallback = (flow_cfg.legacy_flow_id or "").strip()
+                        if not fallback:
                             ui_queue.put(
                                 (
-                                    "log",
-                                    "Langflow flow не смог сгенерировать ответ. Переключаюсь на прямой Mistral fallback…",
+                                    "err",
+                                    "Не настроены RAG-потоки и отсутствует MISTRAL_API_KEY. "
+                                    "Укажите LANGFLOW_FLOW_RAG_* или MISTRAL_API_KEY (либо LANGFLOW_FLOW_ID).",
                                 )
                             )
-                            summary = summarize_documents(
-                                documents_corpus,
-                                flow_cfg.mistral_api_key,
-                                timeout_sec=flow_cfg.request_timeout_sec,
+                            return
+                        ui_queue.put(
+                            (
+                                "log",
+                                "RAG-потоки не настроены. Использую резервный LANGFLOW_FLOW_ID для прямой суммаризации.",
                             )
-                        else:
-                            raise
+                        )
+                        summary = client.run_flow(fallback, payload_direct_summary(documents_corpus))
                 ui_queue.put(("step", "RAG-суммаризация", summary))
                 ui_queue.put(("state", "summary", summary))
                 ui_queue.put(("log", "RAG-суммаризация завершена."))

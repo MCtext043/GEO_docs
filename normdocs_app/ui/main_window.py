@@ -13,6 +13,7 @@ from normdocs_app.config import AppConfig, DEFAULT_LANGFLOW_API_KEY, DEFAULT_LAN
 from normdocs_app.services.flow_provision import provision_normdocs_flows
 from normdocs_app.services.flow_resolve import discover_normdocs_flow_ids
 from normdocs_app.services.langflow_client import LangflowClient, LangflowError, humanize_error
+from normdocs_app.services.report_export import ReportExportError, export_docx, export_md, export_txt
 from normdocs_app.workers import PipelineMode, run_pipeline_in_thread
 
 SETTINGS_FILE = Path.home() / ".normdocs_langflow_settings.json"
@@ -294,8 +295,17 @@ class MainWindow:
         self.var_data = tk.StringVar()
         self.var_norm_files_info = tk.StringVar(value="Файлы не выбраны.")
         self.var_data_files_info = tk.StringVar(value="Файлы не выбраны.")
+        self.var_export_target = tk.StringVar(value="verify")
 
-        paths_header = ttk.Label(card_run, text="Источники данных", style="Section.TLabel")
+        run_nb = ttk.Notebook(card_run)
+        run_nb.pack(fill=tk.BOTH, expand=True)
+
+        tab_create = ttk.Frame(run_nb, padding=(4, 8, 4, 4))
+        tab_output = ttk.Frame(run_nb, padding=(4, 8, 4, 4))
+        run_nb.add(tab_create, text="  Создание  ")
+        run_nb.add(tab_output, text="  Вывод данных  ")
+
+        paths_header = ttk.Label(tab_create, text="Источники данных", style="Section.TLabel")
         paths_header.pack(anchor=tk.W, pady=(0, 4))
 
         def folder_row(parent, label: str, var: tk.StringVar) -> None:
@@ -307,9 +317,9 @@ class MainWindow:
                 side=tk.LEFT
             )
 
-        folder_row(card_run, "Папка с нормативкой", self.var_norm)
-        folder_row(card_run, "Папка с вводными", self.var_data)
-        file_row = ttk.Frame(card_run, style="Surface.TFrame", padding=(12, 10))
+        folder_row(tab_create, "Папка с нормативкой", self.var_norm)
+        folder_row(tab_create, "Папка с вводными", self.var_data)
+        file_row = ttk.Frame(tab_create, style="Surface.TFrame", padding=(12, 10))
         file_row.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(file_row, text="Файлы нормативки", width=22, style="Surface.TLabel").pack(side=tk.LEFT, anchor=tk.NW)
         ttk.Label(file_row, textvariable=self.var_norm_files_info, style="Surface.TLabel").pack(
@@ -322,7 +332,7 @@ class MainWindow:
             style="Secondary.TButton",
             command=lambda: self._pick_files("norm"),
         ).pack(side=tk.LEFT)
-        file_row2 = ttk.Frame(card_run, style="Surface.TFrame", padding=(12, 10))
+        file_row2 = ttk.Frame(tab_create, style="Surface.TFrame", padding=(12, 10))
         file_row2.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(file_row2, text="Файлы вводных", width=22, style="Surface.TLabel").pack(side=tk.LEFT, anchor=tk.NW)
         ttk.Label(file_row2, textvariable=self.var_data_files_info, style="Surface.TLabel").pack(
@@ -336,9 +346,9 @@ class MainWindow:
             command=lambda: self._pick_files("data"),
         ).pack(side=tk.LEFT)
 
-        ttk.Separator(card_run, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(6, 14))
+        ttk.Separator(tab_create, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(6, 14))
 
-        steps_fr = ttk.LabelFrame(card_run, text=" Конвейер Langflow ", padding=(14, 12))
+        steps_fr = ttk.LabelFrame(tab_create, text=" Конвейер Langflow ", padding=(14, 12))
         steps_fr.pack(fill=tk.X, pady=(0, 8))
 
         btn_row = ttk.Frame(steps_fr)
@@ -386,11 +396,8 @@ class MainWindow:
         self.prog = ttk.Progressbar(steps_fr, mode="indeterminate", style="Horizontal.TProgressbar")
         self.prog.pack(fill=tk.X, pady=(0, 2))
 
-        paned = ttk.PanedWindow(card_run, orient=tk.VERTICAL)
-        paned.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
-
-        log_frame = ttk.LabelFrame(paned, text=" Журнал ", padding=(8, 6))
-        paned.add(log_frame, weight=1)
+        log_frame = ttk.LabelFrame(tab_create, text=" Журнал ", padding=(8, 6))
+        log_frame.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
         self.txt_log = tk.Text(
             log_frame,
             height=9,
@@ -405,8 +412,39 @@ class MainWindow:
         _style_text_widget(self.txt_log)
         self.txt_log.pack(fill=tk.BOTH, expand=True)
 
-        out_nb = ttk.Notebook(paned)
-        paned.add(out_nb, weight=3)
+        export_frame = ttk.LabelFrame(tab_output, text=" Экспорт ", padding=(10, 8))
+        export_frame.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(export_frame, text="Что экспортировать:", style="Card.TLabel").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Radiobutton(export_frame, text="Шаг 3 (заключение)", variable=self.var_export_target, value="verify").pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
+        ttk.Radiobutton(export_frame, text="RAG-суммаризацию", variable=self.var_export_target, value="summary").pack(
+            side=tk.LEFT, padx=(0, 8)
+        )
+        ttk.Radiobutton(export_frame, text="Полный отчёт (все шаги)", variable=self.var_export_target, value="full").pack(
+            side=tk.LEFT, padx=(0, 12)
+        )
+        ttk.Button(
+            export_frame,
+            text="TXT",
+            style="Secondary.TButton",
+            command=lambda: self._export_report("txt"),
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(
+            export_frame,
+            text="MD",
+            style="Secondary.TButton",
+            command=lambda: self._export_report("md"),
+        ).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(
+            export_frame,
+            text="DOCX",
+            style="Secondary.TButton",
+            command=lambda: self._export_report("docx"),
+        ).pack(side=tk.LEFT)
+
+        out_nb = ttk.Notebook(tab_output)
+        out_nb.pack(fill=tk.BOTH, expand=True)
 
         def make_out_text(parent) -> tk.Text:
             t = tk.Text(
@@ -551,6 +589,63 @@ class MainWindow:
             max_data_chars=self.var_max_data.get(),
             max_summary_chars=self.var_max_summary.get(),
         )
+
+    def _compose_export_text(self, target: str) -> tuple[str, str]:
+        self._sync_cache_from_widgets()
+        if target == "verify":
+            text = self._cache_filled.strip() + "\n\n" + self.txt_verify.get("1.0", tk.END).strip()
+            text = text.strip()
+            return "заключение", text
+        if target == "summary":
+            text = self.txt_summary.get("1.0", tk.END).strip()
+            return "rag-суммаризация", text
+        text = (
+            "## Шаг 1. Форма отчёта\n\n"
+            + self.txt_form.get("1.0", tk.END).strip()
+            + "\n\n## Шаг 2. Заполненный отчёт\n\n"
+            + self.txt_filled.get("1.0", tk.END).strip()
+            + "\n\n## Шаг 3. Проверка\n\n"
+            + self.txt_verify.get("1.0", tk.END).strip()
+            + "\n\n## RAG-суммаризация\n\n"
+            + self.txt_summary.get("1.0", tk.END).strip()
+        ).strip()
+        return "полный-отчёт", text
+
+    def _export_report(self, fmt: str) -> None:
+        target = self.var_export_target.get().strip() or "verify"
+        base_name, text = self._compose_export_text(target)
+        if len(text.strip()) < 20:
+            messagebox.showwarning("Экспорт", "Нет данных для экспорта. Сначала выполните шаги и получите результат.")
+            return
+
+        ext = {"txt": ".txt", "md": ".md", "docx": ".docx"}[fmt]
+        filetypes = {
+            "txt": (("Text", "*.txt"), ("Все файлы", "*.*")),
+            "md": (("Markdown", "*.md"), ("Все файлы", "*.*")),
+            "docx": (("Word document", "*.docx"), ("Все файлы", "*.*")),
+        }[fmt]
+        path = filedialog.asksaveasfilename(
+            title="Сохранить отчёт",
+            defaultextension=ext,
+            initialfile=f"{base_name}{ext}",
+            filetypes=filetypes,
+        )
+        if not path:
+            return
+
+        try:
+            out = Path(path).resolve()
+            if fmt == "txt":
+                export_txt(out, text)
+            elif fmt == "md":
+                export_md(out, text)
+            else:
+                export_docx(out, text)
+        except (ReportExportError, OSError, RuntimeError) as e:
+            messagebox.showerror("Экспорт", humanize_error(e))
+            return
+
+        messagebox.showinfo("Экспорт", f"Отчёт сохранён: {out}")
 
     def _provision_flows(self) -> None:
         if self._provision_busy:
@@ -780,7 +875,10 @@ class MainWindow:
                         self._cache_summary = val
                     self._update_step_buttons()
                 elif msg[0] == "err":
-                    messagebox.showerror("Ошибка", msg[1])
+                    friendly = str(msg[1]).strip() or "Произошла неизвестная ошибка."
+                    self.txt_log.insert(tk.END, f"ОШИБКА: {friendly}\n")
+                    self.txt_log.see(tk.END)
+                    messagebox.showerror("Ошибка выполнения", friendly)
                     self._set_busy(False)
                 elif msg[0] == "ok":
                     self._set_busy(False)
