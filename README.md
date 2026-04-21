@@ -1,6 +1,6 @@
 # NormDocs — десктопное приложение «Нормативка → отчёт»
 
-Десктопный клиент на Python: читает **папки** с уже распакованными нормативными документами и вводными данными, собирает текст и последовательно вызывает **три потока Langflow** — форма отчёта, заполнение по данным и проверка по нормативке.
+Десктопный клиент на Python: читает **папки или выбранные файлы** с нормативными документами и вводными данными, собирает текст и последовательно вызывает **три потока Langflow** — форма отчёта, заполнение по данным и проверка по нормативке. Дополнительно есть режим **RAG-суммаризации** (ingest + retrieval/summary через отдельные потоки Langflow и vector storage).
 
 ---
 
@@ -15,7 +15,7 @@
 | **Конфигурация** | URL, ключ API, UUID потоков (опционально), лимиты текста и таймауты | `normdocs_app/config.py` |
 | **Документы** | Обход каталогов, извлечение текста (PDF, DOCX, TXT и др.) с лимитом и логом прогресса | `normdocs_app/services/document_text.py` |
 | **Langflow API** | `POST /api/v1/run/{flow_id}`, разбор ответа | `normdocs_app/services/langflow_client.py` |
-| **Payload-ы** | Формирование тела запроса под шаги 1–3 | `normdocs_app/services/payloads.py` |
+| **Payload-ы** | Формирование тела запроса под шаги 1–3 и RAG-суммаризацию | `normdocs_app/services/payloads.py` |
 | **Потоки на сервере** | Поиск UUID по именам `NormDocs — 1./2./3.`; создание потоков из шаблонов API | `flow_resolve.py`, `flow_provision.py` |
 
 Точки входа: `run_desktop.py`, `python -m normdocs_app.main`.
@@ -65,7 +65,8 @@ flowchart LR
 - **Python 3** и отдельное venv для NormDocs (`requirements-normdocs.txt`).
 - Отдельно запущенный **Langflow** (см. [официальный Quickstart](https://github.com/langflow-ai/langflow)): например `uv pip install langflow -U` и `uv run langflow run`, UI на `http://127.0.0.1:7860`.
 - В Langflow нужен **API-ключ** для вызовов из приложения.
-- Документы — **папки** на диске; архивы в приложении не распаковываются.
+- Документы можно задавать как **папки**, **отдельные файлы** или **RAR-архивы**.
+- Поддержан OCR для изображений (`.jpg/.png/.tif/...`) в обычных файлах и внутри `.rar` (через Tesseract).
 
 ---
 
@@ -78,11 +79,21 @@ python -m venv .venv
 pip install -r requirements-normdocs.txt
 ```
 
-Создайте `.env` в корне (не коммитится):
+Скопируйте `.env.example` в `.env` и заполните значения:
 
 ```env
 LANGFLOW_BASE_URL=http://127.0.0.1:7860
-LANGFLOW_API_KEY=ваш_ключ
+LANGFLOW_API_KEY=sk-ezs36Qqkpcs1Uw0Hak132-jiHd8597jTWwzTa4pGVVM
+LANGFLOW_FLOW_ID=62fc74d3-9edf-4d49-b702-51cfe82c976c
+LANGFLOW_FLOW_RAG_INGEST=uuid_ingest_flow
+LANGFLOW_FLOW_RAG_SUMMARY=uuid_summary_flow
+NORMDOCS_RAG_COLLECTION=normdocs_documents
+MISTRAL_API_KEY=ваш_ключ_mistral
+# OCR (опционально)
+NORMDOCS_OCR_LANGS=rus+eng
+NORMDOCS_OCR_MAX_PIXELS=20000000
+# TESSDATA_PREFIX=C:\Sirius\tessdata
+# TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
 ```
 
 Запуск:
@@ -166,7 +177,7 @@ build_normdocs.bat
 | **Ключ в `.env`** | Без валидного `LANGFLOW_API_KEY` защищённые эндпоинты не отдают данные. | Подставить реальный ключ из Langflow (Settings → API Keys). |
 | **Потоки NormDocs** | Имена должны совпадать с префиксами **`NormDocs — 1.…`**, **`2.…`**, **`3.…`**, иначе авто-поиск UUID не сработает. | Создать потоки кнопкой в приложении или вручную с этими именами; опционально задать UUID через `LANGFLOW_FLOW_*`. |
 | **Длинные пути Windows** | Установка `langflow` в venv внутри длинного пути проекта иногда падает. | Long Paths + перезагрузка, короткий путь, или `uv`/отдельный каталог. |
-| **`rarfile` в requirements** | Зависимость остаётся; GUI работает с **папками**, не с RAR. | Либо оставить для скриптов/будущего, либо убрать при чистке зависимостей. |
+| **`rarfile` в requirements** | Нужен для чтения входных `.rar` архивов без ручной распаковки. | Оставить в зависимостях и проверить наличие `unrar`/`bsdtar` в системе. |
 
 ---
 
@@ -200,8 +211,17 @@ tests/
 |------------|------------|
 | `LANGFLOW_BASE_URL` | Базовый URL Langflow |
 | `LANGFLOW_API_KEY` | API-ключ |
-| `LANGFLOW_FLOW_FORM` / `FLOW_FILL` / `FLOW_VERIFY` | UUID потоков (опционально) |
+| `LANGFLOW_FLOW_ID` | Fallback flow для прямой суммаризации |
+| `LANGFLOW_FLOW_FORM` / `FLOW_FILL` / `FLOW_VERIFY` | UUID потоков 1–3 (опционально) |
+| `LANGFLOW_FLOW_RAG_INGEST` / `LANGFLOW_FLOW_RAG_SUMMARY` | UUID потоков RAG ingest/summary |
+| `NORMDOCS_RAG_COLLECTION` | Имя коллекции vector storage (например Chroma) |
+| `MISTRAL_API_KEY` | Ключ Mistral для fallback-суммаризации |
+| `NORMDOCS_OCR_LANGS` | Языки OCR для Tesseract, по умолчанию `rus+eng` |
+| `NORMDOCS_OCR_MAX_PIXELS` | Лимит пикселей OCR-изображения перед автосжатием |
+| `TESSDATA_PREFIX` | Папка с `*.traineddata` (например `C:\Sirius\tessdata`) |
+| `TESSERACT_CMD` | Явный путь к `tesseract.exe` (если не найден автоматически) |
 | `NORMDOCS_MAX_CORPUS_CHARS` / `NORMDOCS_MAX_DATA_CHARS` | Лимиты текста |
+| `NORMDOCS_MAX_SUMMARY_CHARS` | Лимит текста для RAG-суммаризации |
 | `NORMDOCS_REQUEST_TIMEOUT` | Таймаут HTTP, сек |
 
 Подробнее — `normdocs_app/config.py`.

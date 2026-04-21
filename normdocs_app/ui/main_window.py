@@ -9,7 +9,7 @@ import tkinter.font as tkfont
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from normdocs_app.config import AppConfig
+from normdocs_app.config import AppConfig, DEFAULT_LANGFLOW_API_KEY, DEFAULT_LANGFLOW_FLOW_ID
 from normdocs_app.services.flow_provision import provision_normdocs_flows
 from normdocs_app.services.flow_resolve import discover_normdocs_flow_ids
 from normdocs_app.services.langflow_client import LangflowClient, LangflowError, humanize_error
@@ -152,6 +152,9 @@ class MainWindow:
         self._cache_data_text = ""
         self._cache_form = ""
         self._cache_filled = ""
+        self._cache_summary = ""
+        self._norm_files: list[str] = []
+        self._data_files: list[str] = []
 
         outer = ttk.Frame(self.root)
         outer.pack(fill=tk.BOTH, expand=True)
@@ -193,8 +196,12 @@ class MainWindow:
 
         self.var_base = tk.StringVar()
         self.var_key = tk.StringVar()
+        self.var_rag_ingest_flow = tk.StringVar()
+        self.var_rag_summary_flow = tk.StringVar()
+        self.var_rag_collection = tk.StringVar(value="normdocs_documents")
         self.var_max_norm = tk.IntVar(value=120_000)
         self.var_max_data = tk.IntVar(value=120_000)
+        self.var_max_summary = tk.IntVar(value=200_000)
 
         r = 0
         ttk.Label(f_set, text="Базовый URL", style="Card.TLabel").grid(row=r, column=0, sticky=tk.NW, pady=4)
@@ -212,6 +219,21 @@ class MainWindow:
             row=r, column=0, columnspan=2, sticky=tk.W, pady=(6, 4)
         )
         r += 1
+        ttk.Label(f_set, text="RAG flow ingest UUID", style="Card.TLabel").grid(row=r, column=0, sticky=tk.NW, pady=4)
+        ttk.Entry(f_set, textvariable=self.var_rag_ingest_flow, width=58).grid(
+            row=r, column=1, sticky=tk.EW, pady=4, padx=(8, 0)
+        )
+        r += 1
+        ttk.Label(f_set, text="RAG flow summary UUID", style="Card.TLabel").grid(row=r, column=0, sticky=tk.NW, pady=4)
+        ttk.Entry(f_set, textvariable=self.var_rag_summary_flow, width=58).grid(
+            row=r, column=1, sticky=tk.EW, pady=4, padx=(8, 0)
+        )
+        r += 1
+        ttk.Label(f_set, text="RAG collection", style="Card.TLabel").grid(row=r, column=0, sticky=tk.NW, pady=4)
+        ttk.Entry(f_set, textvariable=self.var_rag_collection, width=58).grid(
+            row=r, column=1, sticky=tk.EW, pady=4, padx=(8, 0)
+        )
+        r += 1
         ttk.Label(f_set, text="Макс. симв. нормативки", style="Card.TLabel").grid(row=r, column=0, sticky=tk.W, pady=4)
         ttk.Spinbox(f_set, from_=5000, to=2_000_000, increment=10000, textvariable=self.var_max_norm, width=14).grid(
             row=r, column=1, sticky=tk.W, pady=4, padx=(8, 0)
@@ -219,6 +241,11 @@ class MainWindow:
         r += 1
         ttk.Label(f_set, text="Макс. симв. вводных", style="Card.TLabel").grid(row=r, column=0, sticky=tk.W, pady=4)
         ttk.Spinbox(f_set, from_=5000, to=2_000_000, increment=10000, textvariable=self.var_max_data, width=14).grid(
+            row=r, column=1, sticky=tk.W, pady=4, padx=(8, 0)
+        )
+        r += 1
+        ttk.Label(f_set, text="Макс. симв. для RAG", style="Card.TLabel").grid(row=r, column=0, sticky=tk.W, pady=4)
+        ttk.Spinbox(f_set, from_=5000, to=2_000_000, increment=10000, textvariable=self.var_max_summary, width=14).grid(
             row=r, column=1, sticky=tk.W, pady=4, padx=(8, 0)
         )
         r += 1
@@ -248,7 +275,8 @@ class MainWindow:
             card_set,
             text=(
                 "Langflow: URL и ключ (или .env). Потоки создаются кнопкой выше; при работе отчёта UUID ищутся по API. "
-                "Документы — только из указанных папок (архив распакуйте вручную)."
+                "Для RAG-суммаризации задайте отдельные UUID ingest/summary и коллекцию. "
+                "Документы можно указывать папками, файлами и RAR-архивами."
             ),
             wraplength=920,
             justify=tk.LEFT,
@@ -264,6 +292,8 @@ class MainWindow:
 
         self.var_norm = tk.StringVar()
         self.var_data = tk.StringVar()
+        self.var_norm_files_info = tk.StringVar(value="Файлы не выбраны.")
+        self.var_data_files_info = tk.StringVar(value="Файлы не выбраны.")
 
         paths_header = ttk.Label(card_run, text="Источники данных", style="Section.TLabel")
         paths_header.pack(anchor=tk.W, pady=(0, 4))
@@ -279,6 +309,32 @@ class MainWindow:
 
         folder_row(card_run, "Папка с нормативкой", self.var_norm)
         folder_row(card_run, "Папка с вводными", self.var_data)
+        file_row = ttk.Frame(card_run, style="Surface.TFrame", padding=(12, 10))
+        file_row.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(file_row, text="Файлы нормативки", width=22, style="Surface.TLabel").pack(side=tk.LEFT, anchor=tk.NW)
+        ttk.Label(file_row, textvariable=self.var_norm_files_info, style="Surface.TLabel").pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10)
+        )
+        ttk.Button(
+            file_row,
+            text="Выбрать файлы…",
+            width=15,
+            style="Secondary.TButton",
+            command=lambda: self._pick_files("norm"),
+        ).pack(side=tk.LEFT)
+        file_row2 = ttk.Frame(card_run, style="Surface.TFrame", padding=(12, 10))
+        file_row2.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(file_row2, text="Файлы вводных", width=22, style="Surface.TLabel").pack(side=tk.LEFT, anchor=tk.NW)
+        ttk.Label(file_row2, textvariable=self.var_data_files_info, style="Surface.TLabel").pack(
+            side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10)
+        )
+        ttk.Button(
+            file_row2,
+            text="Выбрать файлы…",
+            width=15,
+            style="Secondary.TButton",
+            command=lambda: self._pick_files("data"),
+        ).pack(side=tk.LEFT)
 
         ttk.Separator(card_run, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=(6, 14))
 
@@ -316,6 +372,13 @@ class MainWindow:
             command=lambda: self._start_pipeline("all"),
         )
         self.btn_run.pack(side=tk.LEFT)
+        self.btn_summary = ttk.Button(
+            btn_row,
+            text="RAG-суммаризация",
+            style="Secondary.TButton",
+            command=lambda: self._start_pipeline("summary"),
+        )
+        self.btn_summary.pack(side=tk.LEFT, padx=(8, 0))
 
         self.var_status = tk.StringVar(value="Готово к работе.")
         ttk.Label(steps_fr, textvariable=self.var_status, style="MutedOnCard.TLabel").pack(anchor=tk.W, pady=(10, 6))
@@ -362,9 +425,11 @@ class MainWindow:
         self.txt_form = make_out_text(out_nb)
         self.txt_filled = make_out_text(out_nb)
         self.txt_verify = make_out_text(out_nb)
+        self.txt_summary = make_out_text(out_nb)
         out_nb.add(self.txt_form, text="  Шаг 1 · Форма  ")
         out_nb.add(self.txt_filled, text="  Шаг 2 · Заполнение  ")
         out_nb.add(self.txt_verify, text="  Шаг 3 · Проверка  ")
+        out_nb.add(self.txt_summary, text="  RAG · Суммаризация  ")
 
         self._load_settings()
         self._defaults_downloads()
@@ -377,6 +442,7 @@ class MainWindow:
         """Подхватить текст из вкладок (если пользователь правил вручную)."""
         self._cache_form = self.txt_form.get("1.0", tk.END).strip()
         self._cache_filled = self.txt_filled.get("1.0", tk.END).strip()
+        self._cache_summary = self.txt_summary.get("1.0", tk.END).strip()
 
     def _update_step_buttons(self) -> None:
         if self._busy:
@@ -384,11 +450,13 @@ class MainWindow:
             self.btn_s2.configure(state=tk.DISABLED)
             self.btn_s3.configure(state=tk.DISABLED)
             self.btn_run.configure(state=tk.DISABLED)
+            self.btn_summary.configure(state=tk.DISABLED)
             return
         self.btn_s1.configure(state=tk.NORMAL)
         self.btn_s2.configure(state=tk.NORMAL if self._cache_form else tk.DISABLED)
         self.btn_s3.configure(state=tk.NORMAL if self._cache_norm_text and self._cache_filled else tk.DISABLED)
         self.btn_run.configure(state=tk.NORMAL)
+        self.btn_summary.configure(state=tk.NORMAL)
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
@@ -411,14 +479,35 @@ class MainWindow:
         d = _load_json()
         base = (os.environ.get("LANGFLOW_BASE_URL") or "").strip() or d.get("base_url", "http://127.0.0.1:7860")
         self.var_base.set(str(base).rstrip("/"))
-        key = (os.environ.get("LANGFLOW_API_KEY") or "").strip() or d.get("api_key", "")
+        key = (os.environ.get("LANGFLOW_API_KEY") or "").strip() or d.get("api_key", DEFAULT_LANGFLOW_API_KEY)
         self.var_key.set(key)
+        self.var_rag_ingest_flow.set(
+            (os.environ.get("LANGFLOW_FLOW_RAG_INGEST") or "").strip() or d.get("flow_rag_ingest", "")
+        )
+        self.var_rag_summary_flow.set(
+            (os.environ.get("LANGFLOW_FLOW_RAG_SUMMARY") or "").strip()
+            or d.get("flow_rag_summary", "")
+            or (os.environ.get("LANGFLOW_FLOW_ID") or "").strip()
+            or DEFAULT_LANGFLOW_FLOW_ID
+        )
+        self.var_rag_collection.set(
+            (os.environ.get("NORMDOCS_RAG_COLLECTION") or "").strip() or d.get("rag_collection", "normdocs_documents")
+        )
         self.var_max_norm.set(int(d.get("max_norm", 120_000)))
         self.var_max_data.set(int(d.get("max_data", 120_000)))
+        self.var_max_summary.set(int(d.get("max_summary", 200_000)))
         if not self.var_norm.get().strip() and d.get("norm_dir"):
             self.var_norm.set(str(d.get("norm_dir", "")).strip())
         if not self.var_data.get().strip() and d.get("data_dir"):
             self.var_data.set(str(d.get("data_dir", "")).strip())
+        self._norm_files = [str(x).strip() for x in d.get("norm_files", []) if str(x).strip()]
+        self._data_files = [str(x).strip() for x in d.get("data_files", []) if str(x).strip()]
+        self.var_norm_files_info.set(
+            f"Выбрано файлов: {len(self._norm_files)}" if self._norm_files else "Файлы не выбраны."
+        )
+        self.var_data_files_info.set(
+            f"Выбрано файлов: {len(self._data_files)}" if self._data_files else "Файлы не выбраны."
+        )
 
     def _save_settings(self) -> None:
         api_key_saved = (
@@ -429,10 +518,17 @@ class MainWindow:
             {
                 "base_url": self.var_base.get().strip(),
                 "api_key": api_key_saved,
+                "flow_rag_ingest": self.var_rag_ingest_flow.get().strip(),
+                "flow_rag_summary": self.var_rag_summary_flow.get().strip(),
+                "legacy_flow": (os.environ.get("LANGFLOW_FLOW_ID") or DEFAULT_LANGFLOW_FLOW_ID).strip(),
+                "rag_collection": self.var_rag_collection.get().strip(),
                 "max_norm": self.var_max_norm.get(),
                 "max_data": self.var_max_data.get(),
+                "max_summary": self.var_max_summary.get(),
                 "norm_dir": self.var_norm.get().strip(),
                 "data_dir": self.var_data.get().strip(),
+                "norm_files": list(self._norm_files),
+                "data_files": list(self._data_files),
             }
         )
         _save_json(prev)
@@ -442,12 +538,18 @@ class MainWindow:
         d = _load_json()
         return AppConfig(
             langflow_base_url=self.var_base.get().strip() or "http://127.0.0.1:7860",
-            api_key=self.var_key.get().strip(),
+            api_key=self.var_key.get().strip() or DEFAULT_LANGFLOW_API_KEY,
+            legacy_flow_id=(os.environ.get("LANGFLOW_FLOW_ID") or d.get("legacy_flow") or DEFAULT_LANGFLOW_FLOW_ID).strip(),
+            mistral_api_key=(os.environ.get("MISTRAL_API_KEY") or d.get("mistral_api_key") or "").strip(),
             flow_form_id=(d.get("flow_form") or "").strip(),
             flow_fill_id=(d.get("flow_fill") or "").strip(),
             flow_verify_id=(d.get("flow_verify") or "").strip(),
+            flow_rag_ingest_id=(self.var_rag_ingest_flow.get().strip() or d.get("flow_rag_ingest") or "").strip(),
+            flow_rag_summary_id=(self.var_rag_summary_flow.get().strip() or d.get("flow_rag_summary") or "").strip(),
+            rag_collection_name=(self.var_rag_collection.get().strip() or d.get("rag_collection") or "normdocs_documents").strip(),
             max_corpus_chars=self.var_max_norm.get(),
             max_data_chars=self.var_max_data.get(),
+            max_summary_chars=self.var_max_summary.get(),
         )
 
     def _provision_flows(self) -> None:
@@ -551,14 +653,31 @@ class MainWindow:
         if path:
             var.set(str(Path(path).resolve()))
 
+    def _pick_files(self, target: str) -> None:
+        initialdir = str(Path.home() / "Downloads")
+        paths = filedialog.askopenfilenames(
+            initialdir=initialdir,
+            title="Выберите документы",
+            filetypes=(
+                ("Документы", "*.pdf *.docx *.txt *.md *.csv *.json *.xml *.html *.htm *.rar"),
+                ("Все файлы", "*.*"),
+            ),
+        )
+        if not paths:
+            return
+        selected = [str(Path(p).resolve()) for p in paths]
+        if target == "norm":
+            self._norm_files = selected
+            self.var_norm_files_info.set(f"Выбрано файлов: {len(selected)}")
+        else:
+            self._data_files = selected
+            self.var_data_files_info.set(f"Выбрано файлов: {len(selected)}")
+
     def _start_pipeline(self, mode: PipelineMode) -> None:
         if self._busy:
             messagebox.showwarning("Занято", "Дождитесь завершения текущей операции.")
             return
         cfg = self._build_config()
-        if not cfg.api_key:
-            messagebox.showwarning("API-ключ", "Укажите API-ключ на вкладке «Настройки».")
-            return
 
         self._sync_cache_from_widgets()
 
@@ -583,16 +702,31 @@ class MainWindow:
             if not self._cache_filled:
                 messagebox.showwarning("Шаг 3", "Сначала выполните шаг 2 (нужен заполненный отчёт).")
                 return
+        if mode == "summary":
+            has_source = (
+                (norm and Path(norm).is_dir())
+                or (data and Path(data).is_dir())
+                or bool(self._norm_files)
+                or bool(self._data_files)
+            )
+            if not has_source:
+                messagebox.showwarning(
+                    "RAG-суммаризация",
+                    "Укажите хотя бы одну папку или выберите файлы (нормативка и/или вводные).",
+                )
+                return
 
         if mode == "all":
-            for w in (self.txt_form, self.txt_filled, self.txt_verify, self.txt_log):
+            for w in (self.txt_form, self.txt_filled, self.txt_verify, self.txt_summary, self.txt_log):
                 w.delete("1.0", tk.END)
             self._cache_norm_text = ""
             self._cache_data_text = ""
             self._cache_form = ""
             self._cache_filled = ""
+            self._cache_summary = ""
         else:
-            self.txt_log.insert(tk.END, f"\n────────── Шаг {mode} ──────────\n")
+            title = f"Шаг {mode}" if mode in {"1", "2", "3"} else "RAG-суммаризация"
+            self.txt_log.insert(tk.END, f"\n────────── {title} ──────────\n")
             self.txt_log.see(tk.END)
 
         self._set_busy(True)
@@ -606,6 +740,9 @@ class MainWindow:
             cached_norm_text=self._cache_norm_text,
             cached_data_text=self._cache_data_text,
             cached_filled=self._cache_filled,
+            cached_summary=self._cache_summary,
+            norm_files=list(self._norm_files),
+            data_files=list(self._data_files),
         )
 
     def _poll_queue(self) -> None:
@@ -626,6 +763,9 @@ class MainWindow:
                     elif "Проверка" in title:
                         self.txt_verify.delete("1.0", tk.END)
                         self.txt_verify.insert("1.0", text)
+                    elif "RAG" in title or "суммар" in title.lower():
+                        self.txt_summary.delete("1.0", tk.END)
+                        self.txt_summary.insert("1.0", text)
                 elif msg[0] == "state":
                     _, key, val = msg
                     if key == "norm_text":
@@ -636,6 +776,8 @@ class MainWindow:
                         self._cache_form = val
                     elif key == "filled":
                         self._cache_filled = val
+                    elif key == "summary":
+                        self._cache_summary = val
                     self._update_step_buttons()
                 elif msg[0] == "err":
                     messagebox.showerror("Ошибка", msg[1])

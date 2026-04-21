@@ -37,3 +37,44 @@ def payload_verify(normative_corpus: str, filled_report: str) -> str:
         "--- ЗАПОЛНЕННЫЙ ОТЧЁТ ---\n"
         f"{filled_report.strip()}"
     )
+
+
+def payload_rag_ingest(collection_name: str, documents_corpus: str) -> str:
+    """Вход для потока RAG-ingest: загрузка документов в vector storage."""
+    return (
+        "RAG_INGEST\n"
+        f"collection: {collection_name.strip()}\n"
+        "Задача: прими документы, разбей на чанки и сохрани в векторное хранилище "
+        "(например Chroma) для последующего поиска.\n\n"
+        "--- ДОКУМЕНТЫ ДЛЯ ИНДЕКСАЦИИ ---\n"
+        f"{documents_corpus.strip()}"
+    )
+
+
+def payload_rag_summary(collection_name: str) -> str:
+    """Вход для потока RAG-summary: retrieval + итоговая суммаризация."""
+    return (
+        "RAG_SUMMARY\n"
+        f"collection: {collection_name.strip()}\n"
+        "Задача: выполни retrieval в указанной коллекции и подготовь итоговую "
+        "суммаризацию документов на русском языке.\n"
+        "Формат ответа:\n"
+        "1) Краткое резюме (5-8 пунктов)\n"
+        "2) Ключевые требования/условия\n"
+        "3) Риски и пробелы в данных\n"
+        "4) Список источников (имена файлов/фрагментов)\n"
+    )
+
+
+def payload_direct_summary(documents_corpus: str) -> str:
+    """Fallback: суммаризация напрямую одним flow без RAG-хранилища."""
+    return (
+        "Задача: суммаризируй переданный корпус документов на русском языке.\n"
+        "Формат ответа:\n"
+        "1) Краткое резюме\n"
+        "2) Ключевые тезисы\n"
+        "3) Риски/пробелы\n"
+        "4) На какие файлы опирался\n\n"
+        "--- ДОКУМЕНТЫ ---\n"
+        f"{documents_corpus.strip()}"
+    )
